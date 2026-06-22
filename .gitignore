@@ -1,0 +1,29 @@
+# Maven
+target/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Java runtime dumps
+hs_err_pid*
+replay_pid*
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
