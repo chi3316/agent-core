@@ -1,0 +1,26 @@
+{
+  "name": "agent-core",
+  "version": "0.1.0",
+  "description": "A TypeScript agent loop core with OpenAI-compatible tool calling.",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@10.34.4",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.9"
+  }
+}
