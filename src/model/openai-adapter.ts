@@ -1,7 +1,7 @@
-import type { AgentContext } from "../context/agent-context.js";
-import type { AgentTurn } from "../session/agent-turn.js";
-import type { AgentTool } from "../tools/agent-tool.js";
-import type { ToolCall } from "./tool-call.js";
+import type { Context } from "../context/context.js";
+import type { Turn } from "../session/session.js";
+import type { Tool } from "../tools/tool.js";
+import type { ToolCall } from "./model.js";
 
 export type OpenAiMessage =
   | Readonly<{
@@ -40,7 +40,7 @@ export type OpenAiToolDefinition = Readonly<{
 
 export function buildOpenAiMessages(input: {
   systemPrompt: string;
-  context: AgentContext;
+  context: Context;
 }): readonly OpenAiMessage[] {
   return [
     {
@@ -51,13 +51,13 @@ export function buildOpenAiMessages(input: {
   ];
 }
 
-export function toOpenAiToolDefinition(tool: AgentTool): OpenAiToolDefinition {
+export function toOpenAiToolDefinition(tool: Tool): OpenAiToolDefinition {
   return {
     type: "function",
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.inputSchema
+      parameters: tool.parameters
     }
   };
 }
@@ -73,14 +73,14 @@ export function toOpenAiToolCall(toolCall: ToolCall): OpenAiToolCall {
   };
 }
 
-function runtimeContext(context: AgentContext): string {
+function runtimeContext(context: Context): string {
   return `Runtime context:\n${JSON.stringify({
     session_id: context.sessionId,
     state: context.state
   })}`;
 }
 
-function turnsToOpenAiMessages(turns: readonly AgentTurn[]): readonly OpenAiMessage[] {
+function turnsToOpenAiMessages(turns: readonly Turn[]): readonly OpenAiMessage[] {
   const messages: OpenAiMessage[] = [];
   const validToolCallIds = new Set<string>();
 

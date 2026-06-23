@@ -1,22 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { ContextBuilder } from "../../src/context/context-builder.js";
-import { AgentLoop } from "../../src/loop/agent-loop.js";
-import { FinishReason } from "../../src/loop/finish-reason.js";
-import type { AgentModel } from "../../src/model/agent-model.js";
-import { assistantMessage } from "../../src/model/assistant-message.js";
-import type { ModelRequest } from "../../src/model/model-request.js";
-import type { ModelResponse } from "../../src/model/model-response.js";
-import { toolCall } from "../../src/model/tool-call.js";
-import { AgentSession } from "../../src/session/agent-session.js";
-import type { AgentTool } from "../../src/tools/agent-tool.js";
-import type { ToolContext } from "../../src/tools/tool-context.js";
-import { denyTool, type ToolPermission } from "../../src/tools/tool-permission.js";
-import { toolSuccess, type ToolResult } from "../../src/tools/tool-result.js";
+import { z } from "zod";
+import { createLoop } from "../../src/loop/run.js";
+import { FinishReason } from "../../src/loop/run.js";
+import type { Model } from "../../src/model/model.js";
+import { assistantMessage } from "../../src/model/model.js";
+import type { ModelRequest } from "../../src/model/model.js";
+import type { ModelResponse } from "../../src/model/model.js";
+import { toolCall } from "../../src/model/model.js";
+import { Session } from "../../src/session/session.js";
+import { denyTool, type Tool, type ToolContext, type ToolPermission } from "../../src/tools/tool.js";
+import { ok, type ToolResult } from "../../src/tools/result.js";
 import { EchoTool } from "../tools/echo-tool.js";
 
-describe("AgentLoop", () => {
+describe("createLoop", () => {
   it("runs a tool call then returns the final answer", async () => {
-    const session = AgentSession.create("42", "100");
+    const session = Session.create("42", "100");
     const echo = new EchoTool();
     const model = new ScriptedModel([
       {
@@ -33,13 +31,13 @@ describe("AgentLoop", () => {
       }
     ]);
 
-    const loop = new AgentLoop(
+    const loop = createLoop({
       model,
-      new Map([[echo.name, echo]]),
-      "Use tools when needed.",
-      new ContextBuilder(12),
-      4
-    );
+      tools: new Map([[echo.name, echo]]),
+      systemPrompt: "Use tools when needed.",
+      context: { maxTurns: 12 },
+      maxSteps: 4
+    });
 
     const result = await loop.runTurn(session, "say hello");
 
@@ -74,17 +72,16 @@ describe("AgentLoop", () => {
         usage: {}
       }
     ]);
-    const session = AgentSession.create("u1", "s1");
-    const loop = new AgentLoop(
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({
       model,
-      new Map([
+      tools: new Map([
         [first.name, first],
         [second.name, second]
       ]),
-      "sys",
-      new ContextBuilder(),
-      4
-    );
+      systemPrompt: "sys",
+      maxSteps: 4
+    });
 
     await loop.runTurn(session, "run");
 
@@ -100,8 +97,8 @@ describe("AgentLoop", () => {
         usage: { completion_tokens: 1 }
       }
     ]);
-    const session = AgentSession.create("u1", "s1");
-    const loop = new AgentLoop(model, new Map(), "sys", new ContextBuilder(), 0);
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({ model, tools: new Map(), systemPrompt: "sys", maxSteps: 0 });
 
     const result = await loop.runTurn(session, "hello");
 
@@ -111,14 +108,13 @@ describe("AgentLoop", () => {
   });
 
   it("returns model error when the model call fails", async () => {
-    const session = AgentSession.create("u1", "s1");
-    const loop = new AgentLoop(
-      new FailingModel(new Error("upstream down")),
-      new Map(),
-      "sys",
-      new ContextBuilder(),
-      4
-    );
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({
+      model: new FailingModel(new Error("upstream down")),
+      tools: new Map(),
+      systemPrompt: "sys",
+      maxSteps: 4
+    });
 
     const result = await loop.runTurn(session, "hello");
 
@@ -140,8 +136,8 @@ describe("AgentLoop", () => {
         usage: {}
       }
     ]);
-    const session = AgentSession.create("u1", "s1");
-    const loop = new AgentLoop(model, new Map(), "sys", new ContextBuilder(), 4);
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({ model, tools: new Map(), systemPrompt: "sys", maxSteps: 4 });
 
     await loop.runTurn(session, "run");
 
@@ -162,12 +158,40 @@ describe("AgentLoop", () => {
         usage: {}
       }
     ]);
-    const session = AgentSession.create("u1", "s1");
-    const loop = new AgentLoop(model, new Map([[tool.name, tool]]), "sys", new ContextBuilder(), 4);
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({
+      model,
+      tools: new Map([[tool.name, tool]]),
+      systemPrompt: "sys",
+      maxSteps: 4
+    });
 
     await loop.runTurn(session, "run");
 
     expect(session.turns()[2]?.content).toContain("not allowed");
+  });
+
+  it("records invalid tool input as a validation error", async () => {
+    const echo = new EchoTool();
+    const model = new ScriptedModel([
+      {
+        message: assistantMessage({
+          toolCalls: [toolCall({ id: "call_1", name: echo.name, argumentsJson: "{\"text\":123}" })]
+        }),
+        usage: {}
+      },
+      {
+        message: assistantMessage({ content: "done" }),
+        usage: {}
+      }
+    ]);
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({ model, tools: [echo], systemPrompt: "sys", maxSteps: 4 });
+
+    await loop.runTurn(session, "run");
+
+    expect(session.turns()[2]?.content).toContain("Invalid tool input");
+    expect(session.turns()[2]?.content).toContain("text");
   });
 
   it("truncates large tool results", async () => {
@@ -184,8 +208,13 @@ describe("AgentLoop", () => {
         usage: {}
       }
     ]);
-    const session = AgentSession.create("u1", "s1");
-    const loop = new AgentLoop(model, new Map([[tool.name, tool]]), "sys", new ContextBuilder(), 4);
+    const session = Session.create("u1", "s1");
+    const loop = createLoop({
+      model,
+      tools: new Map([[tool.name, tool]]),
+      systemPrompt: "sys",
+      maxSteps: 4
+    });
 
     await loop.runTurn(session, "run");
 
@@ -194,7 +223,7 @@ describe("AgentLoop", () => {
   });
 });
 
-class ScriptedModel implements AgentModel {
+class ScriptedModel implements Model {
   readonly requests: ModelRequest[] = [];
   private index = 0;
 
@@ -214,7 +243,7 @@ class ScriptedModel implements AgentModel {
   }
 }
 
-class FailingModel implements AgentModel {
+class FailingModel implements Model {
   constructor(private readonly error: Error) {
   }
 
@@ -223,9 +252,10 @@ class FailingModel implements AgentModel {
   }
 }
 
-class DelayedTool implements AgentTool<Record<string, never>, Readonly<{ name: string }>> {
+class DelayedTool implements Tool<Record<string, never>, Readonly<{ name: string }>> {
   readonly description = "Returns its own name after a delay.";
-  readonly inputSchema = {
+  readonly input = z.object({});
+  readonly parameters = {
     type: "object",
     properties: {}
   };
@@ -236,32 +266,25 @@ class DelayedTool implements AgentTool<Record<string, never>, Readonly<{ name: s
   ) {
   }
 
-  parseInput(): Record<string, never> {
-    return {};
-  }
-
   async execute(
     _input: Record<string, never>,
     _context: ToolContext
   ): Promise<ToolResult<Readonly<{ name: string }>>> {
     await new Promise((resolve) => setTimeout(resolve, this.delayMs));
-    return toolSuccess({ name: this.name });
+    return ok({ name: this.name });
   }
 }
 
-class DeniedTool implements AgentTool<Record<string, never>, never> {
+class DeniedTool implements Tool<Record<string, never>, never> {
   readonly name = "denied";
   readonly description = "Always denied.";
-  readonly inputSchema = {
+  readonly input = z.object({});
+  readonly parameters = {
     type: "object",
     properties: {}
   };
 
-  parseInput(): Record<string, never> {
-    return {};
-  }
-
-  async checkPermission(): Promise<ToolPermission> {
+  async authorize(): Promise<ToolPermission> {
     return denyTool("not allowed");
   }
 
@@ -270,19 +293,16 @@ class DeniedTool implements AgentTool<Record<string, never>, never> {
   }
 }
 
-class LargeResultTool implements AgentTool<Record<string, never>, Readonly<{ text: string }>> {
+class LargeResultTool implements Tool<Record<string, never>, Readonly<{ text: string }>> {
   readonly name = "large";
   readonly description = "Returns a large payload.";
-  readonly inputSchema = {
+  readonly input = z.object({});
+  readonly parameters = {
     type: "object",
     properties: {}
   };
 
-  parseInput(): Record<string, never> {
-    return {};
-  }
-
   async execute(): Promise<ToolResult<Readonly<{ text: string }>>> {
-    return toolSuccess({ text: "x".repeat(2_000) });
+    return ok({ text: "x".repeat(2_000) });
   }
 }

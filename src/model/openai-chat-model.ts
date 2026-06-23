@@ -1,9 +1,9 @@
-import type { Usage } from "../loop/agent-loop-result.js";
-import type { AgentModel } from "./agent-model.js";
-import { assistantMessage } from "./assistant-message.js";
-import type { ModelRequest } from "./model-request.js";
-import type { ModelResponse } from "./model-response.js";
-import { toolCall } from "./tool-call.js";
+import type { Usage } from "../loop/run.js";
+import type { Model } from "./model.js";
+import { assistantMessage } from "./model.js";
+import type { ModelRequest } from "./model.js";
+import type { ModelResponse } from "./model.js";
+import { toolCall } from "./model.js";
 
 type FetchLike = (input: string | URL, init: RequestInit) => Promise<Response>;
 
@@ -15,7 +15,7 @@ export type OpenAiChatModelOptions = Readonly<{
   fetch?: FetchLike;
 }>;
 
-export class OpenAiChatModel implements AgentModel {
+export class OpenAiChatModel implements Model {
   private readonly endpoint: string | URL;
   private readonly temperature: number | undefined;
   private readonly fetchImpl: FetchLike;

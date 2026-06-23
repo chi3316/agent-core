@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OpenAiChatModel } from "../../src/model/openai-chat-model.js";
-import type { ModelRequest } from "../../src/model/model-request.js";
+import type { ModelRequest } from "../../src/model/model.js";
 
 describe("OpenAiChatModel", () => {
   it("posts chat completion payload and parses assistant tool calls", async () => {

@@ -6,11 +6,11 @@
 
 ```text
 src/
-  session/   AgentSession, AgentTurn
-  context/   ContextBuilder, AgentContext
-  loop/      AgentLoop
-  model/     AgentModel, OpenAiChatModel, OpenAI adapter
-  tools/     AgentTool, ToolRegistry, ToolResult
+  session/   Session, Turn
+  context/   buildContext, Context
+  loop/      createLoop
+  model/     Model, OpenAiChatModel, OpenAI adapter
+  tools/     Tool, toolMap, enabledTools, ToolResult
 ```
 
 核心 loop 只负责通用工具调用流程：
@@ -23,7 +23,7 @@ src/
 -> 否则记录 assistant 最终回答并结束
 ```
 
-OpenAI 的 wire format 收口在 `src/model/openai-adapter.ts` 和 `src/model/openai-chat-model.ts`，业务 prompt 和业务工具应该放在 core 包之外。
+OpenAI 的 wire format 收口在 `src/model/openai-adapter.ts` 和 `src/model/openai-chat-model.ts`。工具输入用 Zod schema 解析，业务 prompt 和业务工具应该放在 core 包之外。
 
 ## 安装
 
@@ -39,13 +39,35 @@ npx --yes pnpm@10.34.4 test
 npx --yes pnpm@10.34.4 build
 ```
 
+## REPL
+
+```bash
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=gpt-4.1-mini
+npx --yes pnpm@10.34.4 repl
+```
+
+REPL 默认带一个 `echo` 示例工具。
+
+可选环境变量：
+
+```text
+OPENAI_BASE_URL          默认 https://api.openai.com/v1
+OPENAI_TEMPERATURE      默认 0.2
+AGENT_SYSTEM_PROMPT     覆盖默认 system prompt
+AGENT_CONTEXT_TURNS     默认 12
+AGENT_MAX_STEPS         默认 8
+AGENT_USER_ID           默认 repl_user
+```
+
+`OPENAI_BASE_URL` 可以填根地址，也可以填完整的 `/chat/completions` 地址。
+
 ## 使用
 
 ```ts
 import {
-  AgentLoop,
-  AgentSession,
-  ContextBuilder,
+  Session,
+  createLoop,
   OpenAiChatModel
 } from "agent-core";
 
@@ -54,14 +76,14 @@ const model = new OpenAiChatModel({
   model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini"
 });
 
-const loop = new AgentLoop(
+const loop = createLoop({
   model,
-  new Map(),
-  "Use tools when needed.",
-  new ContextBuilder(12),
-  8
-);
+  tools: [],
+  systemPrompt: "Use tools when needed.",
+  context: { maxTurns: 12 },
+  maxSteps: 8
+});
 
-const session = AgentSession.create("user_1");
+const session = Session.create("user_1");
 const result = await loop.runTurn(session, "hello");
 ```

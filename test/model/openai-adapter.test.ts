@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AgentContext } from "../../src/context/agent-context.js";
+import type { Context } from "../../src/context/context.js";
 import {
   buildOpenAiMessages,
   toOpenAiToolDefinition
 } from "../../src/model/openai-adapter.js";
-import { toolCall } from "../../src/model/tool-call.js";
-import { assistantTurn, toolTurn, userTurn } from "../../src/session/agent-turn.js";
+import { toolCall } from "../../src/model/model.js";
+import { assistantTurn, toolTurn, userTurn } from "../../src/session/session.js";
 import { EchoTool } from "../tools/echo-tool.js";
 
 describe("OpenAI adapter", () => {
   it("builds messages with a single system message", () => {
-    const context: AgentContext = {
+    const context: Context = {
       sessionId: "s1",
       userId: "u1",
       state: { mode: "test" },
@@ -35,7 +35,7 @@ describe("OpenAI adapter", () => {
   });
 
   it("maps assistant tool calls and matching tool results", () => {
-    const context: AgentContext = {
+    const context: Context = {
       sessionId: "s1",
       userId: "u1",
       state: {},
@@ -76,7 +76,7 @@ describe("OpenAI adapter", () => {
   });
 
   it("drops orphan tool results", () => {
-    const context: AgentContext = {
+    const context: Context = {
       sessionId: "s1",
       userId: "u1",
       state: {},

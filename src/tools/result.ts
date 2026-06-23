@@ -10,10 +10,10 @@ export type ToolResult<TData = unknown> = Readonly<
       ok: false;
       error: string;
       metadata: ToolMetadata;
-    }
+	}
 >;
 
-export function toolSuccess<TData>(
+export function ok<TData>(
   data: TData,
   metadata: ToolMetadata = {}
 ): ToolResult<TData> {
@@ -24,7 +24,7 @@ export function toolSuccess<TData>(
   };
 }
 
-export function toolFailure(
+export function err(
   error: string,
   metadata: ToolMetadata = {}
 ): ToolResult<never> {

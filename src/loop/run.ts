@@ -1,50 +1,72 @@
-import type { ContextBuilder } from "../context/context-builder.js";
-import type { AgentModel } from "../model/agent-model.js";
-import { needsFollowUp } from "../model/assistant-message.js";
-import type { ModelRequest, ToolChoice } from "../model/model-request.js";
+import { buildContext, type ContextOptions } from "../context/context.js";
+import { needsFollowUp, type Model, type ModelRequest, type ToolCall, type ToolChoice } from "../model/model.js";
 import {
   buildOpenAiMessages,
   toOpenAiToolDefinition
 } from "../model/openai-adapter.js";
-import type { ToolCall } from "../model/tool-call.js";
-import { AgentSession } from "../session/agent-session.js";
-import { assistantTurn, toolTurn } from "../session/agent-turn.js";
-import { callTool, type AgentTool, type ShapedToolResult, type ToolArgs } from "../tools/agent-tool.js";
-import type { AgentLoopResult, Usage } from "./agent-loop-result.js";
-import { FinishReason } from "./finish-reason.js";
+import { Session } from "../session/session.js";
+import { assistantTurn, toolTurn } from "../session/session.js";
+import { callTool, toolContext, type ShapedToolResult, type ToolArgs } from "../tools/tool.js";
+import { toolMap, type ToolCollection } from "../tools/registry.js";
 
 const MAX_TOOL_RESULT_CHARS = 1_200;
 
-export class AgentLoop {
-  private readonly tools: ReadonlyMap<string, AgentTool>;
+export type FinishReason =
+  | "completed"
+  | "max_steps"
+  | "forced_summary"
+  | "model_error";
 
-  constructor(
-    private readonly model: AgentModel,
-    tools: ReadonlyMap<string, AgentTool> | Readonly<Record<string, AgentTool>>,
-    private readonly systemPrompt: string,
-    private readonly contextBuilder: ContextBuilder,
-    private readonly maxSteps: number
-  ) {
-    this.tools = tools instanceof Map ? new Map(tools) : new Map(Object.entries(tools));
-  }
+export const FinishReason = {
+  Completed: "completed",
+  MaxSteps: "max_steps",
+  ForcedSummary: "forced_summary",
+  ModelError: "model_error"
+} as const satisfies Record<string, FinishReason>;
 
-  async runTurn(session: AgentSession, userMessage: string): Promise<AgentLoopResult> {
+export type Usage = Readonly<Record<string, unknown>>;
+
+export type RunResult = Readonly<{
+  content: string;
+  model?: string;
+  usage: Usage;
+  finishReason: FinishReason;
+  turnCount: number;
+}>;
+
+export type Loop = Readonly<{
+  runTurn(session: Session, userMessage: string): Promise<RunResult>;
+}>;
+
+export type LoopOptions = Readonly<{
+  model: Model;
+  tools?: ToolCollection;
+  systemPrompt: string;
+  maxSteps?: number;
+  context?: ContextOptions;
+}>;
+
+export function createLoop(options: LoopOptions): Loop {
+  const tools = toolMap(options.tools ?? []);
+  const maxSteps = options.maxSteps ?? 8;
+
+  async function runTurn(session: Session, userMessage: string): Promise<RunResult> {
     session.appendUser(userMessage);
-    return this.runIterations(session, 0, undefined, {});
+    return runIterations(session, 0, undefined, {});
   }
 
-  private async runIterations(
-    session: AgentSession,
+  async function runIterations(
+    session: Session,
     turnCount: number,
     lastModel: string | undefined,
     lastUsage: Usage
-  ): Promise<AgentLoopResult> {
-    if (turnCount >= this.maxSteps) {
-      return this.forceSummary(session, turnCount, lastModel, lastUsage);
+  ): Promise<RunResult> {
+    if (turnCount >= maxSteps) {
+      return forceSummary(session, turnCount, lastModel, lastUsage);
     }
 
     try {
-      const response = await this.model.complete(this.prepareModelRequest(session, "auto"));
+      const response = await options.model.complete(prepareModelRequest(session, "auto"));
       const message = response.message;
 
       if (!needsFollowUp(message)) {
@@ -69,8 +91,8 @@ export class AgentLoop {
         usage: response.usage
       }));
 
-      await this.executeTools(session, message.toolCalls);
-      return this.runIterations(session, turnCount + 1, response.model, response.usage);
+      await executeTools(session, message.toolCalls);
+      return runIterations(session, turnCount + 1, response.model, response.usage);
     } catch (error) {
       const content = `Model call failed: ${rootMessage(error)}`;
       session.append(assistantTurn({
@@ -88,38 +110,39 @@ export class AgentLoop {
     }
   }
 
-  private prepareModelRequest(session: AgentSession, toolChoice: ToolChoice): ModelRequest {
-    const context = this.contextBuilder.build(session);
+  function prepareModelRequest(session: Session, toolChoice: ToolChoice): ModelRequest {
+    const context = buildContext(session, options.context);
 
     return {
       messages: buildOpenAiMessages({
-        systemPrompt: this.systemPrompt,
+        systemPrompt: options.systemPrompt,
         context
       }),
-      tools: [...this.tools.values()].map(toOpenAiToolDefinition),
+      tools: [...tools.values()].map(toOpenAiToolDefinition),
       toolChoice,
       userId: session.numericUserId(),
       sessionId: session.numericSessionId()
     };
   }
 
-  private async executeTools(session: AgentSession, toolCalls: readonly ToolCall[]): Promise<void> {
-    const turns = await Promise.all(toolCalls.map((toolCall) => this.executeTool(session, toolCall)));
+  async function executeTools(session: Session, toolCalls: readonly ToolCall[]): Promise<void> {
+    const turns = await Promise.all(toolCalls.map((toolCall) => executeTool(session, toolCall)));
     for (const turn of turns) {
       session.append(turn);
     }
   }
 
-  private async executeTool(session: AgentSession, toolCall: ToolCall) {
+  async function executeTool(session: Session, toolCall: ToolCall) {
     const args = parseArgs(toolCall.argumentsJson);
-    const tool = this.tools.get(toolCall.name);
+    const tool = tools.get(toolCall.name);
+    const context = toolContext(session);
     const result = tool == null
       ? {
           ok: false,
           error: `Unknown tool: ${toolCall.name}`,
           metadata: {}
         } satisfies ShapedToolResult
-      : await callTool(tool, args, session).catch((error: unknown) => ({
+      : await callTool(tool, args, context).catch((error: unknown) => ({
           ok: false,
           error: rootMessage(error),
           metadata: {}
@@ -133,13 +156,13 @@ export class AgentLoop {
     });
   }
 
-  private async forceSummary(
-    session: AgentSession,
+  async function forceSummary(
+    session: Session,
     turnCount: number,
     lastModel: string | undefined,
     lastUsage: Usage
-  ): Promise<AgentLoopResult> {
-    const response = await this.model.complete(this.prepareModelRequest(session, "none"));
+  ): Promise<RunResult> {
+    const response = await options.model.complete(prepareModelRequest(session, "none"));
     const content = response.message.content.trim() === ""
       ? "Too many steps; stopped. Please narrow the request and try again."
       : response.message.content;
@@ -160,6 +183,8 @@ export class AgentLoop {
       turnCount
     };
   }
+
+  return { runTurn };
 }
 
 function parseArgs(rawArgs: string): ToolArgs {

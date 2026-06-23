@@ -1,15 +1,18 @@
-import type { AgentTool, JsonSchema, ToolArgs } from "../../src/tools/agent-tool.js";
-import type { ToolContext } from "../../src/tools/tool-context.js";
-import { toolSuccess, type ToolResult } from "../../src/tools/tool-result.js";
+import { z } from "zod";
+import type { Tool, JsonSchema, ToolContext } from "../../src/tools/tool.js";
+import { ok, type ToolResult } from "../../src/tools/result.js";
 
-type EchoInput = Readonly<{
-  text: string;
-}>;
+const echoInput = z.object({
+  text: z.string()
+});
 
-export class EchoTool implements AgentTool<EchoInput, Readonly<{ text: string }>> {
+type EchoInput = z.infer<typeof echoInput>;
+
+export class EchoTool implements Tool<EchoInput, Readonly<{ text: string }>> {
   readonly name = "echo";
   readonly description = "Echoes the provided text.";
-  readonly inputSchema: JsonSchema = {
+  readonly input = echoInput;
+  readonly parameters: JsonSchema = {
     type: "object",
     properties: {
       text: {
@@ -20,16 +23,10 @@ export class EchoTool implements AgentTool<EchoInput, Readonly<{ text: string }>
     required: ["text"]
   };
 
-  parseInput(args: ToolArgs): EchoInput {
-    return {
-      text: typeof args.text === "string" ? args.text : ""
-    };
-  }
-
   async execute(
     input: EchoInput,
     _context: ToolContext
   ): Promise<ToolResult<Readonly<{ text: string }>>> {
-    return toolSuccess({ text: input.text });
+    return ok({ text: input.text });
   }
 }
